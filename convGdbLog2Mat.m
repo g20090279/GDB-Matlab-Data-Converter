@@ -109,7 +109,7 @@ if ~isempty(logFile)
         tLine = fgetl(fid);
 
         % Initialize values
-        isFound = false;      % if a gdb log file for dump data from GDB is found
+        isFound = false;      % if a gdb log file for dump data from nrsim is found
         isOneline = false;    % if Eigen data is one-line data or spans into multiple lines
         isComplete = false;   % if the data is complete (need for multiple line)
         isFirstWrite = true; % use for outFileMode==1, first write to empty file
@@ -117,9 +117,9 @@ if ~isempty(logFile)
         % Maintain a 3-line buffer
         % Example log setting file:                                       Example log file:
         % | ...                                                           | ...                             |
-        % | ...                                                           | +print "IF:in_var"              |
-        % | print "IF:in_var         "         ------------------>        | $4 = "IF:in_var"                | <- tLinePrev2
-        % | print var                               (log file)            | +print var                      | <- tLinePrev1
+        % | ...                                                           | +print "IF:in_genieChannel"     |
+        % | print "IF:in_genieChannel"         ------------------>        | $4 = "IF:in_genieChannel"       | <- tLinePrev2
+        % | print genieChannel                      (log file)            | +print genieChannel             | <- tLinePrev1
         % | ...                                                           | $5 = Eigen::Matrix<...          | <- tLine
         % | ...                                                           | ...                             |
         %
