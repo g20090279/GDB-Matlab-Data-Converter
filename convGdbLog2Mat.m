@@ -1,5 +1,5 @@
 function convGdbLog2Mat (fileName, outFileMode, inputMode)
-% CONVGDBLOG2MAT converts logging data from GDB into .mat or .m file. It 
+% CONVGDBLOG2MAT converts logging data from GDB into .mat or .m file. It
 % works with C++ Eigen library, where the data looks like
 %          Vector < Vector < Vector < ... Eigen::Matrix<> ... > > >,
 % i.e. only one Eigen::Matrix is capsulated by multiple std::vector. Note
@@ -118,7 +118,7 @@ if ~isempty(logFile)
         % Example log setting file:                                       Example log file:
         % | ...                                                           | ...                             |
         % | ...                                                           | +print "IF:in_var"              |
-        % | print "IF:in_var         "         ------------------>        | $4 = "IF:in_var"                | <- tLinePrev2
+        % | print "IF:in_var"                  ------------------>        | $4 = "IF:in_var"                | <- tLinePrev2
         % | print var                               (log file)            | +print var                      | <- tLinePrev1
         % | ...                                                           | $5 = Eigen::Matrix<...          | <- tLine
         % | ...                                                           | ...                             |
@@ -156,15 +156,60 @@ if ~isempty(logFile)
                     isOneline = true;
                 end
 
-                %%% Detect if there are std::vector(s) encapsulating Eigen::Matrix
-                resStdVec = regexp(patternEigen{2}, 'std::vector of length ([\d]+), capacity ([\d]+)', 'tokens');
-                numStdVec = length(resStdVec);  % Number of std::vectors wrapping Eigen::Matrix
-                dimStdVec = zeros(numStdVec,1);
+                %%% Detect the std::vector(s) Strucutre
+                % vector <vector <vector ... <vector<Eigen::Matrix>> ... >>
+                resStdVec = regexp(patternEigen{2}, 'std::vector of length [\d]+, capacity [\d]+', 'tokens');
+                numVecLayer = length(resStdVec);
+                dimVecLayer = cell(numVecLayer, 1);
+
+                resStdVecAll = regexp(tLine, 'std::vector of length ([\d]+), capacity ([\d]+) = {', 'tokens');
+                numStdVec = length(resStdVecAll);  % Number of std::vectors wrapping Eigen::Matrix
+
+                idxLayer = 0;
+
                 for i = 1:numStdVec
-                    dimStdVec(i) = str2double(resStdVec{i}{1});
+                    if idxLayer < numVecLayer
+                        idxLayer = idxLayer + 1;
+                    else
+                        numThisLayer = length(dimVecLayer{idxLayer});
+                        sumLastLayer = sum(dimVecLayer{idxLayer-1});
+                        while numThisLayer == sumLastLayer
+                            idxLayer = idxLayer - 1;
+                            numThisLayer = length(dimVecLayer{idxLayer});
+                            sumLastLayer = sum(dimVecLayer{idxLayer-1});
+                        end
+                    end
+                    dimVecLayer{idxLayer} = [dimVecLayer{idxLayer}, str2double(resStdVecAll{i}{1})];
                 end
+
+                if numVecLayer == 0
+                    numVecLayer = 1;
+                    dimVecLayer{1} = 1;
+                end
+                
+
+                % Check Dimension of std::vector
+                isValidStdVec = true;
+                dimVecLayerMax = zeros(numVecLayer, 1);
+                dimVecLayerMax(1) = max(dimVecLayer{1});
+                for i = 2 : numVecLayer
+                    numThisLayer = length(dimVecLayer{i});
+                    sumLastLayer = sum(dimVecLayer{i-1});
+                    if numThisLayer ~= sumLastLayer
+                        disp("Error in std::vector! Number of std::vector(s) doesn't match the data.");
+                        isValidStdVec = false;
+                        break;
+                    end
+                    dimVecLayerMax(i) = max(dimVecLayer{i});
+                end
+
+                if ~isValidStdVec
+                    continue;
+                end
+
+                %%% If Valid std::vector Data, Continue
                 % Note: if dimStdVec is empty, numElStdVec is 1, which is correct in our scenario.
-                numElStdVec = prod(dimStdVec);
+                numElStdVec = sum(dimVecLayer{numVecLayer});
 
                 % Record the dimensions of Eigen::Matrix in each std::vector, which may be different
                 dimEigMatInVec = zeros(numElStdVec, 2);
@@ -241,7 +286,7 @@ if ~isempty(logFile)
                 dimEigMatMax = max(dimEigMatInVec,[],1);  % maximum dimension of eigen matrix
 
                 % Dimension of the data. Eigen::Matrix column-weise. Eigen data is the innermost
-                dimAll = [dimStdVec.', fliplr(dimEigMatMax)];   % use this format vector(outer)..vector(inner),Eigen::Matrix.numCols,Eigen::Matrix.numRows is to preserve column dimension by preventing auto-squeezing in Matlab
+                dimAll = [dimVecLayerMax.', fliplr(dimEigMatMax)];   % use this format vector(outer)..vector(inner),Eigen::Matrix.numCols,Eigen::Matrix.numRows is to preserve column dimension by preventing auto-squeezing in Matlab
                 numDimAll = length(dimAll);
 
                 % Initialize Variables
@@ -253,12 +298,13 @@ if ~isempty(logFile)
 
                 % Use following indices to check if enough data are collected for each column of a Eigen::Matrix.
                 % Align the writing index iData when the dimension of a Eigen::Matrix is smaller than the maximum dimension (dimEigMat)
-                cntData     = 1;      % index writing to the result matrix
-                cntVec      = 1;      % index of std::vector, the dimension of Eigen::Matrix in this std::vector may different
-                currColInd  = 1;      % current column index inside one Eigen::Matrix
-                currRowInd  = 1;      % current row index inside one Eigen::Matrix
-                prevRowInd  = 1;      % previous row index inside one Eigen::Matrix
-                iData       = 1;      % index of all Eigen::Matrix
+                cntData       = 1;                      % index writing to the result matrix
+                cntEigMat     = 1;                      % write data column-wise. If less than max length, jump to there
+                currColInd    = 1;                      % current column index inside one Eigen::Matrix
+                currRowInd    = 1;                      % current row index inside one Eigen::Matrix
+                prevRowInd    = 1;                      % previous row index inside one Eigen::Matrix
+                iData         = 1;                      % index of all Eigen::Matrix
+                stdVecDimInd  = ones(numVecLayer,1);    % current std::vector dimension
 
                 if isFound
                     % Get variable name information from GDB log
@@ -267,7 +313,7 @@ if ~isempty(logFile)
                     varNameLog = regexp(tLinePrev1, 'p(?:rint)?\s*(?:[\w]+[->.:]+)*([\w]+)', 'tokens', 'once');
                     if ~isempty(varNameIf)    % When IF name is given, this will overwrite the variable name
                         convertingDataName = ['var', num2str(indCommand), '_', varNameIf{1}];
-                    else        
+                    else
                         if ~isempty(varNameLog)
                             convertingDataName = ['var', num2str(indCommand), '_', varNameLog{1}];
                         else
@@ -306,7 +352,7 @@ if ~isempty(logFile)
                         cntData = cntData + 1;
 
                         % Check if enough data for this Eigen::Matrix column, and if is complete
-                        checkEnoughDataThisColumn;
+                        [cntData, cntEigMat, currRowInd, stdVecDimInd, isComplete] = checkEnoughDataThisColumn(cntData, currRowInd, currColInd, dimEigMatMax, dimEigMatInVec, cntEigMat, dimVecLayer, dimVecLayerMax, stdVecDimInd);
                     end
                 else
                     % Check if out of data block
@@ -361,7 +407,11 @@ if ~isempty(logFile)
                         % Note: reshape will sequeeze out one-dim
                         logData = reshape(logData, fliplr(dimAll));
                         logData = permute(logData, [length(size(logData)):-1:3,1,2]);
-                        logData = reshape(logData, [dimStdVec.',dimEigMatMax]);
+                        if dimVecLayerMax == 1  % if one std::vec, discard this dimension to avoid changing column vector to row vector
+                            logData = reshape(logData, dimEigMatMax);
+                        else
+                            logData = reshape(logData, [dimVecLayerMax.',dimEigMatMax]);
+                        end
                     end
 
                     %%% Output this data, 3 data for each Eigen data
@@ -373,9 +423,9 @@ if ~isempty(logFile)
 
                     if outFileMode == 0
                         if ~isempty(varNameIf)  % if IF name is given, no file name prefix. Warning: data will be overwritten.
-                            save([convertingDataName,'.mat'],'logData','dimStdVec','dimEigMatInVec');
+                            save([convertingDataName,'.mat'],'logData','dimVecLayer','dimEigMatInVec');
                         else
-                            save([convertingFileName, '_', convertingDataName,'.mat'],'logData','dimStdVec','dimEigMatInVec');  % if IF name is not given, 
+                            save([convertingFileName, '_', convertingDataName,'.mat'],'logData','dimVecLayer','dimEigMatInVec');  % if IF name is not given,
                         end
                     elseif outFileMode == 1
                         % Replace with '_' to have valid file name
@@ -388,7 +438,7 @@ if ~isempty(logFile)
                             isFirstWrite = false;
                             fclose(fidw);
                         end
-                        writeEigen2DotmFile(tmpFileName, convertingDataName, logData, dimStdVec, dimEigMatInVec);
+                        writeEigen2DotmFile(tmpFileName, convertingDataName, logData, dimVecLayer, dimEigMatInVec);
                     else
                         disp('The output file format option is not supported');
                     end
@@ -415,58 +465,51 @@ end
 %   Nested Functions   %
 %%%%%%%%%%%%%%%%%%%%%%%%
 
-function processNextLine
-    % Save current two lines, read the new line
-    tLinePrev2 = tLinePrev1;
-    tLinePrev1 = tLine;
-    tLine = fgetl(fid);
-end
-
-function checkDataIndex
-    if isempty(resValue{iData}{2})
-        currColInd = 1;
-    else
-        currColInd = str2double(resValue{iData}{2}) + 1;
+    function processNextLine
+        % Save current two lines, read the new line
+        tLinePrev2 = tLinePrev1;
+        tLinePrev1 = tLine;
+        tLine = fgetl(fid);
     end
 
-    prevRowInd = currRowInd;
-    currRowInd = str2double(resValue{iData}{1}) + 1;
-
-    if cntData ~= (cntVec-1)*prod(dimEigMatMax) + (currColInd-1)*dimEigMatMax(1) + currRowInd % Track global counter and the corresponding index in a column
-        isFound = false;
-        isError = true;
-        errMsg = 'Error: wrong data index!';
-    end
-
-    if prevRowInd > currRowInd && prevRowInd ~= dimEigMatMax(1)    % New column, check if lack of Eigen::Matrix data of last column
-        isFound = false;
-        isError = true;
-        errMsg = ['Error: The ', num2str(cntVec), ' std::vector has not enough data!'];
-    end
-end
-
-function writeData
-    if isempty(resValue{iData}{4}) % Real-valued
-        logData(cntData) = str2double(resValue{iData}{3});
-    else % Complex-valued
-        logData(cntData) = str2double(resValue{iData}{3}) + 1i * str2double(resValue{iData}{4});
-    end
-end
-
-function checkEnoughDataThisColumn
-    if mod(cntData-1, dimEigMatMax(1)) == dimEigMatInVec(cntVec,1) || mod(cntData-1, dimEigMatMax(1)) == 0   % Enough data for this column
-        cntData     = cntData + dimEigMatMax(1) - dimEigMatInVec(cntVec,1);   % jump to the max row dim
-        currRowInd  = dimEigMatMax(1);
-        if currColInd == dimEigMatInVec(cntVec,2)  % If the last column, jump to the max col dim
-            cntData = cntData + dimEigMatMax(1) * ( dimEigMatMax(2) - dimEigMatInVec(cntVec,2) );
-            cntVec  = cntVec + 1;   % std:vector index increases 1
+    function checkDataIndex
+        if isempty(resValue{iData}{2})
+            currColInd = 1;
+        else
+            currColInd = str2double(resValue{iData}{2}) + 1;
         end
-        % Check if all data are captured
-        if cntVec == numElStdVec + 1
-            isComplete = true;
+
+        prevRowInd = currRowInd;
+        currRowInd = str2double(resValue{iData}{1}) + 1;
+
+        tmpJumpInd = 0;
+        for dimIdx = 1:length(dimVecLayerMax)-1
+            tmpJumpInd = tmpJumpInd + (stdVecDimInd(dimIdx)-1)*prod(dimVecLayerMax(dimIdx:end));
+        end
+        tmpJumpInd = tmpJumpInd + mod(cntEigMat,tmpJumpInd) - 1;
+
+        if cntData ~= tmpJumpInd*prod(dimEigMatMax) + (currColInd-1)*dimEigMatMax(1) + currRowInd % Track global counter and the corresponding index in a column
+            isFound = false;
+            isError = true;
+            errMsg = 'Error: wrong data index!';
+        end
+
+        if prevRowInd > currRowInd && prevRowInd ~= dimEigMatMax(1)    % New column, check if lack of Eigen::Matrix data of last column
+            isFound = false;
+            isError = true;
+            errMsg = ['Error: The ', num2str(cntEigMat), '-th std::vector has not enough data!'];
         end
     end
-end
+
+    function writeData
+        if isempty(resValue{iData}{4}) % Real-valued
+            logData(cntData) = str2double(resValue{iData}{3});
+        else % Complex-valued
+            logData(cntData) = complex( str2double(resValue{iData}{3}), str2double(resValue{iData}{4}) );
+        end
+    end
+
+    
 
 end
 
@@ -475,71 +518,101 @@ end
 %   Local Subfunctions   %
 %%%%%%%%%%%%%%%%%%%%%%%%%%
 
-function writeEigen2DotmFile(filename, varname, data, dimVec, dimEigInVec)
-    fid = fopen(filename, 'a');
+function [cntData, cntEigMat, currRowInd, stdVecDimInd, isComplete] = checkEnoughDataThisColumn(cntData, currRowInd, currColInd, dimEigMatMax, dimEigMatInVec, cntEigMat, dimVecLayer, dimVecLayerMax, stdVecDimInd)
+    % Enough data for this column
+    isComplete = false;
+    if mod(cntData-1, dimEigMatMax(1)) == dimEigMatInVec(cntEigMat,1) || mod(cntData-1, dimEigMatMax(1)) == 0
+        % Jump to max length if necessary
+        cntData     = cntData + dimEigMatMax(1) - dimEigMatInVec(cntEigMat,1);   % jump to the max row dim
+        currRowInd  = dimEigMatMax(1);
+        
+        % If the last column (complete data for this Eigen::Matrix), jump to the max col dim
+        if currColInd == dimEigMatInVec(cntEigMat,2)
+            cntData = cntData + dimEigMatMax(1) * ( dimEigMatMax(2) - dimEigMatInVec(cntEigMat,2) );
 
-    % Print the length of std::vector from outer to inner, as comment code
-    fprintf(fid, '\n%% For data %s, number of std:vector is %d', varname, length(dimVec));
-    if isempty(dimVec)
-        fprintf(fid, '.');
-    else
-        fprintf(fid, ', the length of each std:vector from outer to inner is [');
-        for i = 1:length(dimVec)-1
-            fprintf(fid, '%d,', dimVec(i));
-        end
-        fprintf(fid, '%d].', dimVec(end));
-    end
+            cntEigMat  = cntEigMat + 1;   % std:vector index increases 1
 
-    % Print the dimension of Eigen Matrix in each std::vector element, from inner to outer
-    fprintf(fid, '\n%% For data %s, the dimension of Eigen Matrix for each std::vector element (from inner to outer) is: [', varname);
-    for i = 1:size(dimEigInVec,1)-1
-        fprintf(fid, '%d,%d;', dimEigInVec(i,1), dimEigInVec(i,2));
-    end
-    fprintf(fid, '%d,%d]\n', dimEigInVec(end,1), dimEigInVec(end,2));
-
-    % Print data
-    % fprintf(fid, '%s(i,:)=[%.17f,', varname, data(i,j,:));
-    dim = size(data);
-    numDim = length(dim);
-
-    if numDim > 2  % multiple rows in .m file
-        numItem = prod(dim(1:end-2));
-        dimExtra = zeros(numItem, numDim-2);  % every row write the data from last dimension
-
-        % Loop for each dimension larger than 2
-        for i = 1:numDim-2
-             tmpDim = repmat(1:dim(i), prod(dim(i+1:end-2)), 1);
-             dimExtra(:,i) = repmat(tmpDim(:), prod(dim(1:i-1)), 1);
-        end
-
-        % Print the in matrix form
-        for i = 1:numItem
-            % The first row, i.e. 1st element of the second last dimension
-            tmpIdx = regexprep(num2str(dimExtra(i,:)),'\s+',',');
-            eval(['fprintf(fid, ''', varname, '(', tmpIdx, ',:,:)=['');']);
-
-            for j = 1:dim(end-1) % for each row in the matrix
-                % Need to handle real- or complex-valued data
-                if isreal(data)
-                    eval(['fprintf(fid, ''%.17g, '', data(', tmpIdx, ',', num2str(j), ',1:end));']);
+            i = length(dimVecLayerMax);
+            tmpContThisLayer = cntEigMat;
+            tmpContLastLayer = sum(dimVecLayer{i}(1:stdVecDimInd(i)));
+            tmpDiffToMax = prod(dimEigMatMax);
+            
+            while tmpContThisLayer > tmpContLastLayer
+                cntData = cntData + (dimVecLayerMax(i)-dimVecLayer{i}(stdVecDimInd(i))) * tmpDiffToMax;
+                stdVecDimInd(i) = stdVecDimInd(i) + 1;
+                
+                tmpContThisLayer = stdVecDimInd(i);
+                i = i - 1;
+                if i > 0
+                    tmpContLastLayer = sum(dimVecLayer{i}(1:stdVecDimInd(i)));
+                    tmpDiffToMax = tmpDiffToMax * (dimVecLayerMax(i) - dimVecLayer{i}(stdVecDimInd(i)));
                 else
-                    eval(['tmpData=squeeze(data(', tmpIdx, ',', num2str(j), ',1:end));']);
-                    tmpData = [real(tmpData).'; imag(tmpData).'];
-                    fprintf(fid, '%.17g + %.17gi, ', tmpData(:));
+                    tmpContThisLayer = 0;
+                    tmpContLastLayer = 0;
                 end
-                fprintf(fid, '; ');
             end
-            fprintf(fid, '];\n');
+
         end
+        
+        % Check if all data are captured
+        if cntEigMat == sum(dimVecLayer{end}) + 1
+            isComplete = true;
+        end
+    end
+end
 
-    else  % only one row in .m file
-        fprintf(fid, '%s=[', varname);
+function writeEigen2DotmFile(filename, varname, data, dimVec, dimEigInVec)
+fid = fopen(filename, 'a');
 
-        for i = 1:dim(1)
+% Print the length of std::vector from outer to inner, as comment code
+fprintf(fid, '\n%% For data %s, the structure of std:vector is: ', varname);
+if isempty(dimVec)
+    fprintf(fid, 'not valid.');
+else
+    for i = 1:length(dimVec)
+        fprintf(fid, '\n%% - layer 1: ');
+        for j = 1:length(dimVec{i})-1
+            fprintf(fid, '%d,', dimVec{i}(j));
+        end
+        fprintf(fid, '%d.', dimVec{i}(end));
+    end    
+end
+
+% Print the dimension of Eigen Matrix in each std::vector element, from inner to outer
+fprintf(fid, '\n%% For data %s, the dimension of Eigen Matrix for each std::vector element (from inner to outer) is: [', varname);
+for i = 1:size(dimEigInVec,1)-1
+    fprintf(fid, '%d,%d;', dimEigInVec(i,1), dimEigInVec(i,2));
+end
+fprintf(fid, '%d,%d]\n', dimEigInVec(end,1), dimEigInVec(end,2));
+
+% Print data
+% fprintf(fid, '%s(i,:)=[%.17f,', varname, data(i,j,:));
+dim = size(data);
+numDim = length(dim);
+
+if numDim > 2  % multiple rows in .m file
+    numItem = prod(dim(1:end-2));
+    dimExtra = zeros(numItem, numDim-2);  % every row write the data from last dimension
+
+    % Loop for each dimension larger than 2
+    for i = 1:numDim-2
+        tmpDim = repmat(1:dim(i), prod(dim(i+1:end-2)), 1);
+        dimExtra(:,i) = repmat(tmpDim(:), prod(dim(1:i-1)), 1);
+    end
+
+    % Print the in matrix form
+    for i = 1:numItem
+        % The first row, i.e. 1st element of the second last dimension
+        tmpIdx = regexprep(num2str(dimExtra(i,:)),'\s+',',');
+        eval(['fprintf(fid, ''', varname, '(', tmpIdx, ',:,:)=['');']);
+
+        for j = 1:dim(end-1) % for each row in the matrix
+            % Need to handle real- or complex-valued data
             if isreal(data)
-                fprintf(fid, '%.17g, ', data(i,:));
+                eval(['fprintf(fid, ''%.17g, '', data(', tmpIdx, ',', num2str(j), ',1:end));']);
             else
-                tmpData = [real(data(i,:));imag(data(i,:))];
+                eval(['tmpData=squeeze(data(', tmpIdx, ',', num2str(j), ',1:end));']);
+                tmpData = [real(tmpData).'; imag(tmpData).'];
                 fprintf(fid, '%.17g + %.17gi, ', tmpData(:));
             end
             fprintf(fid, '; ');
@@ -547,6 +620,21 @@ function writeEigen2DotmFile(filename, varname, data, dimVec, dimEigInVec)
         fprintf(fid, '];\n');
     end
 
-    % Close file pointer
-    fclose(fid);
+else  % only one row in .m file
+    fprintf(fid, '%s=[', varname);
+
+    for i = 1:dim(1)
+        if isreal(data)
+            fprintf(fid, '%.17g, ', data(i,:));
+        else
+            tmpData = [real(data(i,:));imag(data(i,:))];
+            fprintf(fid, '%.17g + %.17gi, ', tmpData(:));
+        end
+        fprintf(fid, '; ');
+    end
+    fprintf(fid, '];\n');
+end
+
+% Close file pointer
+fclose(fid);
 end

@@ -29,7 +29,8 @@ for i = 1:numTests
 end
 
 %%% Convert File
-convGdbLog2Mat('testbench/gdb.log.testbench.txt',1);
+convGdbLog2Mat('testbench/gdb.log.testbench.txt');
+% convGdbLog2Mat('testbench/gdb.log.testbench.txt',1);
 
 %%% Compare Results
 if exist('gdb_log_testbench.m', 'file') == 2
