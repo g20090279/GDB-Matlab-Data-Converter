@@ -58,6 +58,12 @@ A testbench is ready to verify the changes in the code.
 
 # CHANGELOG
 
+- v0.8 **Important Feature**
+  - Support the following feature for the structure `std::vector<std::vector<...>>`. Consider `vector<vector<VectorCd>> a`,
+    - `a[0][0]` and `a[0][1]` can have different length,
+    - `a[0][0]` and `a[1][0]` can have different length,
+    - and so on.
+
 - v0.7 **Useful feature**
   - need to clear repo history,
   - converted data can be store in a `.m` file besides `.mat` file,
