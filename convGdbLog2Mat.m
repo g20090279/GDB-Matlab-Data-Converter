@@ -332,7 +332,7 @@ if ~isempty(logFile)
                     % normal double format: [0,0] = -19.952623149688797
                     % normal complex-valued double format: [0,0] = {_M_value = 0.14589548774745745 + -0.13207671786275996i}
                     % fxp format: [0] = {_M_real = -1728, _M_imag = 1312}
-                    resValue = regexp(tLine, '\[(\d+)(?:,)?(\d+)*\]\s*=\s*(?:{(_M_value|_M_real)\s*=\s*)?(-?\s*\d*\.?\d*e?-?\d*)(?:\s*(\+|,?\s*_M_imag\s*=*)\s*)?(-?\s*\d*\.?\d*e?-?\d*)*', 'tokens');
+                    resValue = regexp(tLine, '\[(\d+)(?:,)?(\d+)*\]\s*=\s*(?:{(_M_value|_M_real)\s*=\s*)?(-?\s*\d*\.?\d*e?[+-]?\d*)(?:\s*(\+|,?\s*_M_imag\s*=*)\s*)?(-?\s*\d*\.?\d*e?[+-]?\d*)*', 'tokens');
 
                     if length(resValue) ~= sum(prod(dimEigMatInVec,2))   % If didn't capture all data
                         isFound = false;
@@ -376,7 +376,7 @@ if ~isempty(logFile)
                     % Pattern 3 - matrix with complex-valued data: Eigen::Matrix<std::complex<double>,288,2,ColMajor> (data ptr: 0x1d927c0) = {[0,0] = {_M_value = 0.21752604580125023 + -0.43954164224987846 * I"
                     % Note 1: For column data, the second element of resValue is empty.
                     % Note 2: For real-valued data, the fourth element of resValue is empty.
-                    resValue = regexp(tLine, '\[(\d+)(?:,)?(\d+)*\]\s*=\s*(?:{_M_value\s*=\s*)?(-?\s*\d*\.?\d*e?-?\d*)(?:\s*\+\s*)?(-?\s*\d*\.?\d*e?-?\d*)*', 'tokens');
+                    resValue = regexp(tLine, '\[(\d+)(?:,)?(\d+)*\]\s*=\s*(?:{_M_value\s*=\s*)?(-?\s*\d*\.?\d*e?[+-]?\d*)(?:\s*\+\s*)?(-?\s*\d*\.?\d*e?[+-]?\d*)*', 'tokens');
 
                     if ~isempty(resValue)
                         if length(resValue) ~= 1  % For multi-line data, only one element is present on each line.
