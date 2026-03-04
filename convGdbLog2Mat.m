@@ -332,7 +332,7 @@ if ~isempty(logFile)
                     % normal double format: [0,0] = -19.952623149688797
                     % normal complex-valued double format: [0,0] = {_M_value = 0.14589548774745745 + -0.13207671786275996i}
                     % fxp format: [0] = {_M_real = -1728, _M_imag = 1312}
-                    resValue = regexp(tLine, '\[(\d+)(?:,)?(\d+)*\]\s*=\s*(?:{(_M_value|_M_real)\s*=\s*)?(-?\s*\d*\.?\d*e?-?\d*)(?:\s*(\+|,?\s*_M_imag\s*=*)\s*)?(-?\s*\d*\.?\d*e?-?\d*)*', 'tokens');
+                    resValue = regexp(tLine, '\[(\d+)(?:,)?(\d+)*\]\s*=\s*(?:{(_M_value|_M_real)\s*=\s*)?(-?\s*\d*\.?\d*e?[-+]?\d*)(?:\s*(\+|,?\s*_M_imag\s*=*)\s*)?(-?\s*\d*\.?\d*e?[+-]?\d*)*', 'tokens');
 
                     if length(resValue) ~= sum(prod(dimEigMatInVec,2))   % If didn't capture all data
                         isFound = false;
